@@ -15,6 +15,8 @@ const PAGESIZE = 5;
 const loadRouter = express.Router();
 const boatRouter = express.Router();
 
+const contentTypes = ["application/json"];
+
 app.use(bodyParser.json());
 
 function fromDatastore(item){
@@ -59,6 +61,32 @@ function clean_load(id) {
     return get_load(id).then((load) => {
         const cleaned_load = {"number": load.number, "current_boat": null, "self": load.self};
         return datastore.save({"key": key, "method": "update", "data": cleaned_load})
+    })
+}
+
+function put_load(id, weight, content, delivery_date, carrier){
+    const key = datastore.key([LOAD, parseInt(id,10)]);
+    const load = {"weight": weight, "content": content, "delivery_date": delivery_date, "carrier": carrier};
+    load.id = id;
+    return datastore.save({"key":key, "data":load});
+}
+
+function patch_load(id, body) {
+    const key = datastore.key([LOAD, parseInt(id,10)]);
+
+    return get_load(id).then((load) => {
+        if (load) {
+            const edited_load = {"weight": body.weight || load.weight, "content": body.content || load.content, 
+                "delivery_date": body.delivery_date || load.delivery_date};
+            edited_load.self = load.self;
+            edited_load.id = id;
+            edited_load.carrier = load.carrier;
+            return datastore.save({"key": key, "method": "update", "data": edited_load}).then(() => {
+                return edited_load;
+            })
+        } else {
+            return {Error: "No load with this load_id exists"};
+        }
     })
 }
 
@@ -162,9 +190,28 @@ function put_load_on_boat(boat_id, load_id){
     })
 }
 
-function put_boat(id, name, type, length){
+function patch_boat(id, body) {
     const key = datastore.key([BOAT, parseInt(id,10)]);
-    const boat = {"name": name, "type": type, "length": length};
+
+    return get_boat(id).then((boat) => {
+        if (boat) {
+            const edited_boat = {"name": body.name || boat.name, "type": body.type || boat.type, "length": body.length || boat.length};
+            edited_boat.self = boat.self;
+            edited_boat.id = id;
+            edited_boat.loads = boat.loads;
+            return datastore.save({"key": key, "method": "update", "data": edited_boat}).then(() => {
+                return edited_boat;
+            })
+        } else {
+            return {Error: "No boat with this boat_id exists"};
+        }
+    })
+}
+
+function put_boat(id, name, type, length, loads){
+    const key = datastore.key([BOAT, parseInt(id,10)]);
+    const boat = {"name": name, "type": type, "length": length, "loads": loads};
+    boat.id = id;
     return datastore.save({"key":key, "data":boat});
 }
 
@@ -246,6 +293,34 @@ loadRouter.post('/', function(req, res){
     .then( new_load => {res.status(201).send(JSON.stringify(new_load))} );
 });
 
+loadRouter.patch('/:id', function(req, res) {
+    get_load(req.params.id).then((load) => {
+        if (!load) {
+            res.status(404).send(JSON.stringify({Error: "No load with this load_id exists"}));
+        }
+    });
+
+    patch_load(req.params.id, req.body)
+    .then(val => {
+        if (val.Error) {
+            res.status(404).send(val);
+        } else {
+            res.status(200).json(val);
+        }
+    })
+});
+
+loadRouter.put('/:id', function(req, res) {
+    get_load(req.params.id).then((load) => {
+        if (load) {
+            put_load(req.params.id, req.body.weight, req.body.content, req.body.delivery_date, load.carrier)
+            .then(res.status(200).send());
+        } else {
+            res.status(404).send(JSON.stringify({Error: "No load with this load_id exists"}));
+        }
+    })
+});
+
 loadRouter.delete('/:id', function(req, res){
     const load = get_load(req.params.id)
     .then( (load) => {
@@ -287,6 +362,10 @@ boatRouter.get('/', function(req, res){
 });
 
 boatRouter.get('/:id', function(req, res){
+    if (req.header("Accept") !== "*/*" && !contentTypes.includes(req.header("Accept"))) {
+        res.status(406).send(JSON.stringify({Error: "Unsupported content type"}));
+    }
+
     const boat = get_boat(req.params.id)
     .then( (boat) => {
         if (boat) {
@@ -320,11 +399,13 @@ boatRouter.post('/', function(req, res){
 });
 
 boatRouter.patch('/:id', function(req, res) {
-    if (!req.body.name || !req.body.type || !req.body.length) {
-        res.status(400).send(JSON.stringify({Error: "The request object is missing at least one of the required attributes"}));
-    }
+    get_boat(req.params.id).then((boat) => {
+        if (!boat) {
+            res.status(404).send(JSON.stringify({Error: "No boat with this boat_id exists"}));
+        }
+    });
 
-    patch_boat(req.params.id, req.body.name, req.body.type, req.body.length)
+    patch_boat(req.params.id, req.body)
     .then(val => {
         if (val.Error) {
             res.status(404).send(val);
@@ -335,8 +416,14 @@ boatRouter.patch('/:id', function(req, res) {
 });
 
 boatRouter.put('/:id', function(req, res){
-    put_boat(req.params.id, req.body.name, req.body.type, req.body.length)
-    .then(res.status(200));
+    get_boat(req.params.id).then((boat) => {
+        if (boat) {
+            put_boat(req.params.id, req.body.name, req.body.type, req.body.length, boat.loads)
+            .then(res.status(200).send());
+        } else {
+            res.status(404).send(JSON.stringify({Error: "No boat with this boat_id exists"}));
+        }
+    })
 });
 
 boatRouter.put('/:id/loads/:load_id', function(req, res){
@@ -386,6 +473,10 @@ boatRouter.delete('/:id/loads/:load_id', function (req, res) {
         }
     });
 });
+
+boatRouter.delete('/', function(req, res) {
+    res.status(405).send(JSON.stringify({Error: "Unsupported method on /boats url"}));
+})
 
 /* ------------- End Controller Functions ------------- */
 
