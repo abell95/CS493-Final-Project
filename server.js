@@ -9,11 +9,13 @@ const datastore = new Datastore({projectId:projectId});
 
 const LOAD = "Load";
 const BOAT = "Boat";
+const USER = "User";
 
 const PAGESIZE = 5;
 
 const loadRouter = express.Router();
 const boatRouter = express.Router();
+const userRouter = express.Router();
 
 const contentTypes = ["application/json"];
 
@@ -255,6 +257,41 @@ function delete_boat_load(id, load_id) {
 
 /* ------------- End Model Functions ------------- */
 
+/* ------------- Begin User Model Functions ------------- */
+
+function post_user(req){
+    var key = datastore.key(USER);
+    
+    // const new_boat = {"name": name, "type": type, "length": length, "loads": []};
+    const new_user = {};
+	return datastore.save({"key":key, "data":new_user}).then(() => {
+        const self = `${req.protocol + '://' + req.get('host')}/users/${key.id}`;
+        new_user.self = self;
+        return datastore.save({"key": key, "data": new_user}).then(() => {
+            new_user.id = key.id;
+            return new_user;
+        })
+    });
+}
+
+function get_user(id){
+    const key = datastore.key([USER, parseInt(id,10)]);
+    const query = datastore.createQuery(USER);
+    const userQuery = query.filter('__key__', key);
+    return datastore.runQuery(userQuery).then( (entities) => {
+        return entities[0].map(fromDatastore)[0];
+    });
+}
+
+function get_users(){
+	const q = datastore.createQuery(USER);
+	return datastore.runQuery(q).then( (entities) => {
+			return entities[0].map(fromDatastore);
+		});
+}
+
+/* ------------- End Model Functions ------------- */
+
 /* ------------- Begin Load Controller Functions ------------- */
 
 loadRouter.get('/', function(req, res){
@@ -480,8 +517,38 @@ boatRouter.delete('/', function(req, res) {
 
 /* ------------- End Controller Functions ------------- */
 
+/* ------------- Begin User Controller Functions ------------- */
+
+userRouter.get('/', function(req, res){
+    const users = get_users()
+	.then( (users) => {
+        res.status(200).json(users);
+    });
+});
+
+userRouter.get('/:id', function(req, res){
+    const user = get_user(req.params.id)
+    .then( (user) => {
+        if (user) {
+            res.status(200).json(user);
+        } else {
+            res.status(404).send(JSON.stringify({Error: "No user with this user_id exists"}));
+        }
+    });
+});
+
+userRouter.post('/', function(req, res){
+    console.log(req.body);
+
+    post_user(req)
+    .then( new_user => {res.status(201).send(JSON.stringify(new_user))} );
+});
+
+/* ------------- End Controller Functions ------------- */
+
 app.use('/loads', loadRouter);
 app.use('/boats', boatRouter);
+app.use('/users', userRouter);
 
 // Listen to the App Engine-specified port, or 8080 otherwise
 const PORT = process.env.PORT || 8080;
