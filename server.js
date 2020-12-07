@@ -1,6 +1,8 @@
 const express = require('express');
 const app = express();
 
+require('dotenv').config();
+
 const {Datastore} = require('@google-cloud/datastore');
 const bodyParser = require('body-parser');
 
@@ -19,7 +21,40 @@ const userRouter = express.Router();
 
 const contentTypes = ["application/json"];
 
+const {auth} = require('express-openid-connect');
+
+app.use(
+    auth({
+      issuerBaseURL: process.env.ISSUER_BASE_URL,
+      baseURL: process.env.BASE_URL,
+      clientID: process.env.CLIENT_ID,
+      secret: process.env.SECRET,
+    })
+  );
+
 app.use(bodyParser.json());
+
+const jwt = require('express-jwt');
+const jwtAuthz = require('express-jwt-authz');
+const jwksRsa = require('jwks-rsa');
+const { response } = require('express');
+
+const checkJwt = jwt({
+    // Dynamically provide a signing key
+    // based on the kid in the header and 
+    // the signing keys provided by the JWKS endpoint.
+    secret: jwksRsa.expressJwtSecret({
+      cache: true,
+      rateLimit: true,
+      jwksRequestsPerMinute: 5,
+      jwksUri: `https://belland.us.auth0.com/.well-known/jwks.json`
+    }),
+  
+    // Validate the audience and the issuer.
+    audience: 'http://localhost:8080',
+    issuer: `https://belland.us.auth0.com/`,
+    algorithms: ['RS256']
+  });
 
 function fromDatastore(item){
     item.id = item[Datastore.KEY].id;
@@ -549,6 +584,10 @@ userRouter.post('/', function(req, res){
 app.use('/loads', loadRouter);
 app.use('/boats', boatRouter);
 app.use('/users', userRouter);
+
+app.get('/', (req, res) => {
+    res.send(req.oidc.isAuthenticated() ? req.oidc.user : "No active user");
+})
 
 // Listen to the App Engine-specified port, or 8080 otherwise
 const PORT = process.env.PORT || 8080;
