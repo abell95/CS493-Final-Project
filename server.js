@@ -294,11 +294,10 @@ function delete_boat_load(id, load_id) {
 
 /* ------------- Begin User Model Functions ------------- */
 
-function post_user(req){
+function post_user(req, user_id){
     var key = datastore.key(USER);
     
-    // const new_boat = {"name": name, "type": type, "length": length, "loads": []};
-    const new_user = {};
+    const new_user = {"user_id": user_id};
 	return datastore.save({"key":key, "data":new_user}).then(() => {
         const self = `${req.protocol + '://' + req.get('host')}/users/${key.id}`;
         new_user.self = self;
@@ -313,6 +312,14 @@ function get_user(id){
     const key = datastore.key([USER, parseInt(id,10)]);
     const query = datastore.createQuery(USER);
     const userQuery = query.filter('__key__', key);
+    return datastore.runQuery(userQuery).then( (entities) => {
+        return entities[0].map(fromDatastore)[0];
+    });
+}
+
+function get_user_by_user_id(user_id){
+    const query = datastore.createQuery(USER);
+    const userQuery = query.filter('user_id', user_id);
     return datastore.runQuery(userQuery).then( (entities) => {
         return entities[0].map(fromDatastore)[0];
     });
@@ -586,7 +593,24 @@ app.use('/boats', boatRouter);
 app.use('/users', userRouter);
 
 app.get('/', (req, res) => {
-    res.send(req.oidc.isAuthenticated() ? req.oidc.user : "No active user");
+    if (req.oidc.isAuthenticated()) {
+        res.redirect('/userinfo')
+    } else {
+        res.send("Not logged in");
+    }
+})
+
+app.get('/userinfo', (req, res) => {
+    const userId = req.oidc.user.sub;
+    get_user_by_user_id(userId).then((user) => {
+        if (user) {
+            res.send("Logged in to user\n" + userId);
+        } else {
+            post_user(req, userId).then(() => {
+                res.send("New user created\n" + userId)
+            })
+        }
+    })
 })
 
 // Listen to the App Engine-specified port, or 8080 otherwise
